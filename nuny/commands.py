@@ -259,64 +259,98 @@ async def advertise(ctx, world, start, legacy="0"):
             await ctx.message.add_reaction('✅')
 
 @nuny.discord_utils.bot.command(name="advmanual", 
-                                aliases=['adm','mshout','msh'],
+                                aliases=['adm', 'mshout', 'msh'],
                                 help='''Advertise your train. 
-                                        Put multi-part parameters in quotes (eg. .mshout "[Twintania] Hunt train starting in 10 minutes at Fort Jobb")''',
+                                        Put multi-part parameters in quotes (eg. .mshout "Twintania Hunt train starting in 10 minutes at Fort Jobb")
+                                        Supports a world parameter before the message, will set world to Running status. Must be done manually if not provided.''',
                                 ignore_extra=False)
-
-async def madvertise(ctx, message, legacy="0"):
+async def madvertise(ctx, *, args: str):
     if ctx.channel.id != nuny.config.conf["discord"]["channels"]["bot"]:
         return
-    username=ctx.message.author.display_name
+
+    args = args.strip()
+    username = ctx.message.author.display_name
     await bot_log(f"{ctx.message.author.display_name}: {ctx.message.content}")
-    
-    if len(message)<6:
+
+    split_args = args.rsplit(maxsplit=1)
+    if len(split_args) == 2 and split_args[1] in ["4", "5", "6", "L", "l"]:
+        legacy = split_args[1]
+        args = split_args[0].strip()
+    else:
+        legacy = "0"
+
+    if args.startswith('"') and args.endswith('"'):
+        args = args[1:-1]
+    parts = args.split(maxsplit=1)
+    if len(parts) == 2:
+        world, message = parts
+        try:
+            world = parse_world(world)
+        except ValueError:
+            await ctx.message.add_reaction("❓")
+            await ctx.send("Invalid world.")
+            return
+    else:
+        world = None
+        message = parts[0]
+
+    if message.startswith('"') and message.endswith('"'):
+        message = message[1:-1]
+
+    if len(message) < 6:
         await ctx.message.add_reaction("❌")
         await ctx.send("Message needs to be over 5 characters.")
         return
 
-    parm=parse_parameters(None,legacy)
-    l=parm[1]
-    stb=parm[2]
-    if l==0:
-        msg=f"About to send this notification to various servers: ```@Endwalker_role {message} (Conductor: {username}).```React with ✅ to send or wait 30 seconds to cancel."
-    if l==1:
-        msg=f"About to send this notification to various servers: ```@Shadowbringers_role {message} (Conductor: {username}).```React with ✅ to send or wait 30 seconds to cancel."
-    if stb==1:
-        msg=f"About to send this notification to various servers: ```@Stormblood_role {message} (Conductor: {username}).```React with ✅ to send or wait 30 seconds to cancel."
+    parm = parse_parameters(None, legacy)
+    l = parm[1]
+    stb = parm[2]
+    
+    if legacy == "4":
+        stb = 1
+    elif legacy == "6":
+        l = 0
+        stb = 0
 
-    msg1=await ctx.send(msg)
+    if l == 0 and stb == 0:
+        msg = f"About to send this notification to various servers: ```@Endwalker_role {message} (Conductor: {username}).```React with ✅ to send or wait 30 seconds to cancel."
+    elif l == 1 and stb == 0:
+        msg = f"About to send this notification to various servers: ```@Shadowbringers_role {message} (Conductor: {username}).```React with ✅ to send or wait 30 seconds to cancel."
+    elif stb == 1:
+        msg = f"About to send this notification to various servers: ```@Stormblood_role {message} (Conductor: {username}).```React with ✅ to send or wait 30 seconds to cancel."
+
+    msg1 = await ctx.send(msg)
     await msg1.add_reaction("✅")
 
     def check(reaction, user):
-        return reaction.message.id==msg1.id and str(reaction.emoji)=='✅' and user.id == ctx.author.id
+        return reaction.message.id == msg1.id and str(reaction.emoji) == '✅' and user.id == ctx.author.id
 
     try:
-        res=await nuny.discord_utils.bot.wait_for("reaction_add", check=check,timeout=30)
+        res = await nuny.discord_utils.bot.wait_for("reaction_add", check=check, timeout=30)
     except asyncio.TimeoutError:
-        logging.debug ("Timed out while waiting for reaction.")
         await msg1.delete()
         await ctx.message.add_reaction('❌')
-        pass
     else:
-        if res:
-            reaction, user=res
-            logging.debug (reaction.emoji)
+        reaction, user = res
 
-            for i in nuny.discord_utils.bot.guilds:
-                emoji=nuny.discord_utils.discord.utils.get(i.emojis, name="doggospin")
-            await msg1.add_reaction(emoji)
+        for i in nuny.discord_utils.bot.guilds:
+            emoji = nuny.discord_utils.discord.utils.get(i.emojis, name="doggospin")
+        await msg1.add_reaction(emoji)
 
-            expansion=6
-            if l==1:
-                expansion=5
-            if stb==1:
-                expansion=4
-            
-            msg=f"{message} (Conductor: {username})."
-            await nuny.discord_utils.post_webhooks(msg,expansion)
+        expansion = 6
+        if l == 1 and stb == 0:
+            expansion = 5
+        if stb == 1:
+            expansion = 4
+        
+        await nuny.discord_utils.post_webhooks(message, expansion)
 
-            await msg1.delete()
-            await ctx.message.add_reaction('✅')
-            if stb!=1:
-                await scout_log("Please set the server running manually if needed.")
+        if world:
+            time = parm[0]
+            if stb == 0:
+                await update_sheet(world, "Running", time, l)
+
+        await msg1.delete()
+        await ctx.message.add_reaction('✅')
+        if stb != 1 and not world:
+            await scout_log("Please set the server running manually if needed.")
