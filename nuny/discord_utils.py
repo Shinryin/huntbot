@@ -19,6 +19,8 @@ async def on_command_error(ctx: commands.Context, error):
         await ctx.send("Too many arguments. You might have forgot to put the message in \"\".")
 
     if isinstance(error, commands.CommandNotFound):
+        if ctx.message.content.strip().lstrip(".") == "":
+            return
         await ctx.message.add_reaction('❌')
         await ctx.send("Command not found. Check your typing.")
 
